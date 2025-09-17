@@ -1,10 +1,12 @@
 package org.example.spai.domain.openai.service;
 
 import lombok.RequiredArgsConstructor;
+import org.example.spai.domain.openai.dto.CityResponseDto;
 import org.example.spai.domain.openai.entity.ChatEntity;
 import org.example.spai.repository.ChatRepository;
 import org.springframework.ai.audio.transcription.AudioTranscriptionPrompt;
 import org.springframework.ai.audio.transcription.AudioTranscriptionResponse;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
@@ -12,7 +14,6 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingOptions;
@@ -29,7 +30,6 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
-import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -45,7 +45,10 @@ public class OpenAiService {
 
     // 1. chat model
 
-    public String generate(String text){
+    public CityResponseDto generate(String text){
+
+        ChatClient chatClient = ChatClient.create(openAiChatModel);
+
         // 메시지
         SystemMessage systemMessage = new SystemMessage("");
         UserMessage userMessage = new UserMessage(text);
@@ -61,13 +64,18 @@ public class OpenAiService {
         Prompt prompt = new Prompt(List.of(systemMessage, userMessage, assistantMessage), options);
 
         //요청, 응답
-        ChatResponse response = openAiChatModel.call(prompt);
-        return response.getResult().getOutput().getText();
+        return chatClient.prompt(prompt)
+                .call()
+                .entity(CityResponseDto.class);
 
     }
 
     // stream으로 받는 메소드
     public Flux<String> generateStream(String text){
+
+        ChatClient chatClient = ChatClient.create(openAiChatModel);
+
+
         // 유저&페이지별 Chat Memory 관리하기 위한 key (시큐리티와 같은 것으로 받을 수 있지만 우선 명시적으로)
         String userId = "patrick" + "_" + "1";
 
@@ -97,9 +105,22 @@ public class OpenAiService {
         StringBuilder responseBuffer = new StringBuilder();
 
         //요청, 응답
-        return openAiChatModel.stream(prompt)
-                .mapNotNull(response -> response.getResult().getOutput().getText())
-                .doOnNext(responseBuffer::append) // null이 제거된 값만 누적
+        /**
+         *  ChatClient 를 사용하는 이유
+         *  - ObservationRegistry : 로깅
+         *  - tools : LLM에게 사용할 툴을 붙여줌
+         *  - advisor : RAG
+         *  - entity : 응답 데이터 객체 파싱 ( call 메소드만 )
+         *  - 추상화 : 모델 변경되어도 동일한 메소드
+         */
+        return chatClient.prompt(prompt)
+                .tools(new ChatTools())
+                .stream()
+                .content()
+                .map(token ->{
+                    responseBuffer.append(token);
+                    return token;
+                })
                 .doOnComplete(() -> {
                     chatMemory.add(userId, new AssistantMessage(responseBuffer.toString()));
                     chatMemoryRepository.saveAll(userId, chatMemory.get(userId));
@@ -112,6 +133,23 @@ public class OpenAiService {
 
                     chatRepository.saveAll(List.of(chatUserEntity, chatAssistantEntity));
                 });
+
+
+//        return openAiChatModel.stream(prompt)
+//                .mapNotNull(response -> response.getResult().getOutput().getText())
+//                .doOnNext(responseBuffer::append) // null이 제거된 값만 누적
+//                .doOnComplete(() -> {
+//                    chatMemory.add(userId, new AssistantMessage(responseBuffer.toString()));
+//                    chatMemoryRepository.saveAll(userId, chatMemory.get(userId));
+//
+//                    //전체 대화 저장용
+//                    ChatEntity chatAssistantEntity = new ChatEntity();
+//                    chatAssistantEntity.setUserId(userId);
+//                    chatAssistantEntity.setType(MessageType.ASSISTANT);
+//                    chatAssistantEntity.setContent(responseBuffer.toString());
+//
+//                    chatRepository.saveAll(List.of(chatUserEntity, chatAssistantEntity));
+//                });
 
     }
 

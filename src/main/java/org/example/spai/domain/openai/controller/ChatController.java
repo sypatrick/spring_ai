@@ -1,6 +1,7 @@
 package org.example.spai.domain.openai.controller;
 
 import lombok.RequiredArgsConstructor;
+import org.example.spai.domain.openai.dto.CityResponseDto;
 import org.example.spai.domain.openai.entity.ChatEntity;
 import org.example.spai.domain.openai.service.ChatService;
 import org.example.spai.domain.openai.service.OpenAiService;
@@ -19,7 +20,7 @@ public class ChatController {
 
     @ResponseBody
     @PostMapping("/chat")
-    public String chat(@RequestBody Map<String, String> body){
+    public CityResponseDto chat(@RequestBody Map<String, String> body){
         return openAiService.generate(body.get("text"));
     }
 
