@@ -1,12 +1,15 @@
 package org.example.spai.domain.openai.service;
 
 import lombok.RequiredArgsConstructor;
+import org.example.spai.domain.openai.entity.ChatEntity;
+import org.example.spai.repository.ChatRepository;
 import org.springframework.ai.audio.transcription.AudioTranscriptionPrompt;
 import org.springframework.ai.audio.transcription.AudioTranscriptionResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -38,6 +41,7 @@ public class OpenAiService {
     private final OpenAiAudioSpeechModel openAiAudioSpeechModel;
     private final OpenAiAudioTranscriptionModel openAiAudioTranscriptionModel;
     private final ChatMemoryRepository chatMemoryRepository;
+    private final ChatRepository chatRepository;
 
     // 1. chat model
 
@@ -61,10 +65,17 @@ public class OpenAiService {
         return response.getResult().getOutput().getText();
 
     }
+
     // stream으로 받는 메소드
     public Flux<String> generateStream(String text){
         // 유저&페이지별 Chat Memory 관리하기 위한 key (시큐리티와 같은 것으로 받을 수 있지만 우선 명시적으로)
         String userId = "patrick" + "_" + "1";
+
+        // 전체 대화 저장용
+        ChatEntity chatUserEntity = new ChatEntity();
+        chatUserEntity.setUserId(userId);
+        chatUserEntity.setType(MessageType.USER);
+        chatUserEntity.setContent(text);
 
         // 메시지
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
@@ -92,6 +103,14 @@ public class OpenAiService {
                 .doOnComplete(() -> {
                     chatMemory.add(userId, new AssistantMessage(responseBuffer.toString()));
                     chatMemoryRepository.saveAll(userId, chatMemory.get(userId));
+
+                    //전체 대화 저장용
+                    ChatEntity chatAssistantEntity = new ChatEntity();
+                    chatAssistantEntity.setUserId(userId);
+                    chatAssistantEntity.setType(MessageType.ASSISTANT);
+                    chatAssistantEntity.setContent(responseBuffer.toString());
+
+                    chatRepository.saveAll(List.of(chatUserEntity, chatAssistantEntity));
                 });
 
     }
